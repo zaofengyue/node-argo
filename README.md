@@ -5,7 +5,9 @@
 ## 工作原理
 
 ```
-客户端 → Cloudflare CDN → Argo 隧道 → Node.js HTTP 服务 → v2ray
+客户端 → Cloudflare CDN → Argo 隧道(ARGO_PORT) → v2ray(内部)
+                               ↓
+                    Node.js HTTP(PORT) → 伪装页 / 订阅
 ```
 
 - **临时隧道**：不填写 `ARGO_DOMAIN` 和 `ARGO_AUTH`，启动时自动获取 `xxx.trycloudflare.com` 域名，重启后域名会变
@@ -22,6 +24,8 @@ index.js
 package.json
 index.html（可选，自定义伪装页面）
 ```
+
+或直接下载 [Releases](https://github.com/zaofengyue/node-argo/releases) 里的 `node-argo.zip` 解压后上传。
 
 ### 方式二：Docker 镜像部署
 
@@ -75,7 +79,8 @@ UUID=xxx ARGO_DOMAIN=你的域名 ARGO_AUTH=你的Token bash <(curl -sL https://
 | 变量名 | 说明 | 默认值 |
 |---|---|---|
 | `UUID` | 节点唯一ID | 自动生成 |
-| `PORT` | 监听端口 | `3000` |
+| `PORT` | 对外监听端口 | `3000` |
+| `ARGO_PORT` | Argo 内部转发端口 | `8001` |
 | `NAME` | 节点名称 | 自动识别国家+ASN |
 | `SUB` | 订阅路径 | `sub` |
 | `ARGO_DOMAIN` | 固定隧道域名 | 留空用临时隧道 |
@@ -86,6 +91,7 @@ UUID=xxx ARGO_DOMAIN=你的域名 ARGO_AUTH=你的Token bash <(curl -sL https://
 ```javascript
 const PRESET_UUID        = '';
 const PRESET_PORT        = '';
+const PRESET_ARGO_PORT   = '';
 const PRESET_NAME        = '';
 const PRESET_SUB         = '';
 const PRESET_ARGO_DOMAIN = '';
