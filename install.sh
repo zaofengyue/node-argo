@@ -40,6 +40,7 @@ $DL "$BASE_URL/index.html" $DL_O index.html
 
 INPUT_UUID="${UUID:-}"
 INPUT_PORT="${PORT:-}"
+INPUT_ARGO_PORT="${ARGO_PORT:-}"
 INPUT_NAME="${NAME:-}"
 INPUT_SUB="${SUB:-}"
 INPUT_ARGO_DOMAIN="${ARGO_DOMAIN:-}"
@@ -50,6 +51,7 @@ if [ -z "$INPUT_UUID" ] && [ -z "$INPUT_PORT" ] && [ -z "$INPUT_ARGO_DOMAIN" ]; 
   echo -e "${YELLOW}========== 环境变量配置（留空使用默认值）==========${NC}"
   read -p "UUID（留空自动生成）: " INPUT_UUID
   read -p "PORT（留空默认 3000）: " INPUT_PORT
+  read -p "ARGO_PORT（留空默认 8001）: " INPUT_ARGO_PORT
   read -p "NAME/节点名称（留空自动识别）: " INPUT_NAME
   read -p "SUB/订阅路径（留空默认 sub）: " INPUT_SUB
   echo ""
@@ -60,12 +62,12 @@ fi
 
 export UUID="$INPUT_UUID"
 export PORT="$INPUT_PORT"
+export ARGO_PORT="$INPUT_ARGO_PORT"
 export NAME="$INPUT_NAME"
 export SUB="$INPUT_SUB"
 export ARGO_DOMAIN="$INPUT_ARGO_DOMAIN"
 export ARGO_AUTH="$INPUT_ARGO_AUTH"
 
-# 开机自启
 if command -v systemctl >/dev/null 2>&1; then
   echo ""
   echo -e "${YELLOW}是否设置开机自启？(y/n)${NC}"
@@ -82,6 +84,7 @@ User=$USER
 WorkingDirectory=$APP_DIR
 Environment=UUID=$INPUT_UUID
 Environment=PORT=$INPUT_PORT
+Environment=ARGO_PORT=$INPUT_ARGO_PORT
 Environment=NAME=$INPUT_NAME
 Environment=SUB=$INPUT_SUB
 Environment=ARGO_DOMAIN=$INPUT_ARGO_DOMAIN
