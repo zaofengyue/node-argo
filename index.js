@@ -1,0 +1,302 @@
+// ========== 预留配置，留空则自动识别 ==========
+const PRESET_UUID      = '';
+const PRESET_PORT      = '';
+const PRESET_NAME      = '';
+const PRESET_SUB       = '';
+const PRESET_ARGO_DOMAIN = '';
+const PRESET_ARGO_AUTH   = '';
+// =============================================
+
+const { execSync, spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const https = require('https');
+const http = require('http');
+
+const HOME = process.env.HOME || '/tmp';
+const UUID_FILE = `${HOME}/uuid.txt`;
+const CONFIG_FILE = `${HOME}/v2ray-config.json`;
+const V2RAY_DIR = `${HOME}/v2ray`;
+const V2RAY_BIN_PATH = `${V2RAY_DIR}/v2ray`;
+const CLOUDFLARED_BIN = `${HOME}/cloudflared`;
+const WS_PATH = '/fengyue';
+const V2RAY_INTERNAL_PORT = 10000;
+
+function httpGet(url, timeout = 5000) {
+  return new Promise((resolve) => {
+    const req = https.get(url, { timeout }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data.trim()));
+    });
+    req.on('error', () => resolve(''));
+    req.on('timeout', () => { req.destroy(); resolve(''); });
+  });
+}
+
+function download(url, dest) {
+  try {
+    execSync(`curl -sL "${url}" -o "${dest}"`);
+    return;
+  } catch {}
+  try {
+    execSync(`wget -q "${url}" -O "${dest}"`);
+    return;
+  } catch {}
+  throw new Error(`下载失败: ${url}`);
+}
+
+async function downloadV2ray() {
+  if (fs.existsSync(V2RAY_BIN_PATH)) return V2RAY_BIN_PATH;
+
+  const arch = os.arch();
+  const archMap = {
+    'x64': 'linux-64',
+    'arm64': 'linux-arm64-v8a',
+    'arm': 'linux-arm32-v7a'
+  };
+  const platform = archMap[arch] || 'linux-64';
+
+  console.log(`正在下载 v2ray (${platform})...`);
+
+  const release = await httpGet('https://api.github.com/repos/v2fly/v2ray-core/releases/latest');
+  let version = 'v5.16.1';
+  try { version = JSON.parse(release).tag_name || version; } catch {}
+
+  const url = `https://github.com/v2fly/v2ray-core/releases/download/${version}/v2ray-${platform}.zip`;
+  fs.mkdirSync(V2RAY_DIR, { recursive: true });
+  download(url, `${HOME}/v2ray.zip`);
+  execSync(`unzip -qo "${HOME}/v2ray.zip" -d "${V2RAY_DIR}" && chmod +x "${V2RAY_BIN_PATH}"`);
+  console.log('v2ray 下载完成');
+  return V2RAY_BIN_PATH;
+}
+
+async function downloadCloudflared() {
+  if (fs.existsSync(CLOUDFLARED_BIN)) {
+    execSync(`chmod +x "${CLOUDFLARED_BIN}"`);
+    return CLOUDFLARED_BIN;
+  }
+
+  const arch = os.arch();
+  const archMap = {
+    'x64': 'linux-amd64',
+    'arm64': 'linux-arm64',
+    'arm': 'linux-arm'
+  };
+  const platform = archMap[arch] || 'linux-amd64';
+
+  console.log(`正在下载 cloudflared (${platform})...`);
+  const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${platform}`;
+  download(url, CLOUDFLARED_BIN);
+  execSync(`chmod +x "${CLOUDFLARED_BIN}"`);
+  console.log('cloudflared 下载完成');
+  return CLOUDFLARED_BIN;
+}
+
+function startArgoTunnel(cfBin, inboundPort, argoDomain, argoAuth) {
+  return new Promise((resolve) => {
+    let args;
+    let argoHost = '';
+
+    if (argoDomain && argoAuth) {
+      // 固定隧道
+      console.log('启动固定 Argo 隧道...');
+      if (argoAuth.includes('.json') || argoAuth.startsWith('{')) {
+        // json 凭证文件方式
+        fs.writeFileSync(`${HOME}/tunnel.json`, argoAuth);
+        args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
+                'run', '--token', argoAuth,
+                '--url', `http://127.0.0.1:${inboundPort}`];
+      } else {
+        // token 方式
+        args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
+                'run', '--token', argoAuth];
+      }
+      argoHost = argoDomain;
+      const cf = spawn(cfBin, args, { stdio: 'pipe' });
+      cf.on('error', (err) => console.error('cloudflared error:', err));
+      setTimeout(() => resolve(argoHost), 3000);
+    } else {
+      // 临时隧道
+      console.log('启动临时 Argo 隧道...');
+      args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
+              '--url', `http://127.0.0.1:${inboundPort}`];
+      const cf = spawn(cfBin, args, { stdio: 'pipe' });
+
+      // 从日志里解析分配的域名
+      cf.stderr.on('data', (data) => {
+        const str = data.toString();
+        const match = str.match(/https:\/\/([a-z0-9-]+\.trycloudflare\.com)/);
+        if (match && !argoHost) {
+          argoHost = match[1];
+          console.log(`临时隧道域名: ${argoHost}`);
+          resolve(argoHost);
+        }
+      });
+
+      cf.on('error', (err) => console.error('cloudflared error:', err));
+
+      // 30秒超时还没获取到域名就继续
+      setTimeout(() => {
+        if (!argoHost) {
+          console.log('临时隧道域名获取超时');
+          resolve('');
+        }
+      }, 30000);
+    }
+  });
+}
+
+async function main() {
+  // UUID
+  let UUID = PRESET_UUID || process.env.UUID || '';
+  if (UUID) {
+    fs.writeFileSync(UUID_FILE, UUID);
+  } else if (fs.existsSync(UUID_FILE)) {
+    UUID = fs.readFileSync(UUID_FILE, 'utf8').trim();
+  } else {
+    UUID = require('crypto').randomUUID();
+    fs.writeFileSync(UUID_FILE, UUID);
+  }
+
+  const INBOUND_PORT = parseInt(PRESET_PORT || process.env.PORT || '3000');
+
+  const SUB_RAW = PRESET_SUB || process.env.SUB || 'sub';
+  const SUB_PATH = '/' + SUB_RAW.replace(/^\//, '');
+
+  const ARGO_DOMAIN = PRESET_ARGO_DOMAIN || process.env.ARGO_DOMAIN || '';
+  const ARGO_AUTH = PRESET_ARGO_AUTH || process.env.ARGO_AUTH || '';
+
+  // 获取节点名称
+  const COUNTRY = await httpGet('https://ipinfo.io/country') ||
+                  await httpGet('https://ifconfig.co/country-iso') ||
+                  '';
+
+  let NAME = process.env.NAME || '';
+  if (!NAME) {
+    let ASN_ORG = await httpGet('https://ipinfo.io/org') ||
+                  await httpGet('https://ifconfig.co/org') ||
+                  '';
+    ASN_ORG = ASN_ORG
+      .replace(/^AS\d+\s+/, '')
+      .replace(/,?\s*Inc\.?$/, '')
+      .replace(/,?\s*LLC\.?/g, '')
+      .replace(/,?\s*Ltd\.?/g, '')
+      .replace(/,?\s*Corp\.?/g, '')
+      .trim()
+      .substring(0, 20);
+    NAME = COUNTRY && ASN_ORG ? `${COUNTRY}-${ASN_ORG}` :
+           COUNTRY ? `${COUNTRY}-argo` : 'argo';
+  }
+
+  // 生成 v2ray 配置
+  const config = {
+    log: { loglevel: 'warning' },
+    inbounds: [{
+      port: V2RAY_INTERNAL_PORT,
+      listen: '127.0.0.1',
+      protocol: 'vmess',
+      settings: {
+        clients: [{ id: UUID, alterId: 0 }]
+      },
+      streamSettings: {
+        network: 'ws',
+        wsSettings: { path: WS_PATH }
+      }
+    }],
+    outbounds: [{ protocol: 'freedom', settings: {} }]
+  };
+
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+
+  // 下载并启动 v2ray
+  let v2rayBin = '';
+  const v2rayPaths = ['v2ray', '/usr/local/bin/v2ray', '/usr/bin/v2ray'];
+  for (const p of v2rayPaths) {
+    try { execSync(`which ${p} 2>/dev/null || test -x ${p}`); v2rayBin = p; break; } catch {}
+  }
+  if (!v2rayBin) v2rayBin = await downloadV2ray();
+
+  const v2rayEnv = { ...process.env };
+  delete v2rayEnv.PORT;
+
+  const v2ray = spawn(v2rayBin, ['run', '-config', CONFIG_FILE], {
+    stdio: 'inherit',
+    env: v2rayEnv
+  });
+  v2ray.on('exit', (code) => process.exit(code));
+
+  // 启动 HTTP 服务（给 cloudflared 转发用）
+  const INDEX_HTML = fs.existsSync('./index.html')
+    ? fs.readFileSync('./index.html', 'utf8')
+    : '<html><body><h1>Hello World</h1></body></html>';
+
+  const server = http.createServer((req, res) => {
+    const url = req.url.split('?')[0];
+    if (url === SUB_PATH) {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(global.SUB_CONTENT || '');
+    } else if (url === WS_PATH) {
+      res.writeHead(400);
+      res.end('Bad Request');
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(INDEX_HTML);
+    }
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    const net = require('net');
+    const proxy = net.connect(V2RAY_INTERNAL_PORT, '127.0.0.1', () => {
+      proxy.write(
+        `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n` +
+        Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') +
+        '\r\n\r\n'
+      );
+      proxy.write(head);
+      socket.pipe(proxy);
+      proxy.pipe(socket);
+    });
+    proxy.on('error', () => socket.destroy());
+    socket.on('error', () => proxy.destroy());
+  });
+
+  server.listen(INBOUND_PORT, '0.0.0.0', () => {
+    console.log(`HTTP 服务启动，端口 ${INBOUND_PORT}`);
+  });
+
+  // 下载并启动 cloudflared
+  const cfBin = await downloadCloudflared();
+  const argoHost = await startArgoTunnel(cfBin, INBOUND_PORT, ARGO_DOMAIN, ARGO_AUTH);
+
+  const HOST = argoHost || 'your-domain.com';
+
+  // 生成 VMess 链接
+  const vmessObj = {
+    v: '2',
+    ps: NAME,
+    add: HOST,
+    port: '443',
+    id: UUID,
+    aid: '0',
+    scy: 'auto',
+    net: 'ws',
+    type: 'none',
+    host: HOST,
+    path: WS_PATH,
+    tls: 'tls'
+  };
+
+  const VMESS_LINK = 'vmess://' + Buffer.from(JSON.stringify(vmessObj)).toString('base64');
+  global.SUB_CONTENT = Buffer.from(VMESS_LINK).toString('base64');
+
+  console.log('================= VMESS =================');
+  console.log(VMESS_LINK);
+  console.log('=========================================');
+  console.log(`订阅地址: https://${HOST}${SUB_PATH}`);
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
