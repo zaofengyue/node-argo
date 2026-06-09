@@ -8,7 +8,6 @@ NC='\033[0m'
 
 echo -e "${GREEN}========== node-argo 一键安装 ==========${NC}"
 
-# 检测下载工具
 if command -v curl >/dev/null 2>&1; then
   DL="curl -sL"
   DL_O="-o"
@@ -20,7 +19,6 @@ else
   exit 1
 fi
 
-# 检测依赖
 if ! command -v node >/dev/null 2>&1; then
   echo -e "${RED}缺少 node，请先安装 Node.js${NC}"
   exit 1
@@ -40,7 +38,6 @@ $DL "$BASE_URL/index.js" $DL_O index.js
 $DL "$BASE_URL/package.json" $DL_O package.json
 $DL "$BASE_URL/index.html" $DL_O index.html
 
-# 环境变量配置
 INPUT_UUID="${UUID:-}"
 INPUT_PORT="${PORT:-}"
 INPUT_NAME="${NAME:-}"
@@ -68,7 +65,7 @@ export SUB="$INPUT_SUB"
 export ARGO_DOMAIN="$INPUT_ARGO_DOMAIN"
 export ARGO_AUTH="$INPUT_ARGO_AUTH"
 
-# 开机自启（systemd）
+# 开机自启
 if command -v systemctl >/dev/null 2>&1; then
   echo ""
   echo -e "${YELLOW}是否设置开机自启？(y/n)${NC}"
