@@ -1,8 +1,8 @@
 // ========== 预留配置，留空则自动识别 ==========
-const PRESET_UUID      = '';
-const PRESET_PORT      = '';
-const PRESET_NAME      = '';
-const PRESET_SUB       = '';
+const PRESET_UUID        = '';
+const PRESET_PORT        = '';
+const PRESET_NAME        = '';
+const PRESET_SUB         = '';
 const PRESET_ARGO_DOMAIN = '';
 const PRESET_ARGO_AUTH   = '';
 // =============================================
@@ -20,7 +20,8 @@ const V2RAY_DIR = `${HOME}/v2ray`;
 const V2RAY_BIN_PATH = `${V2RAY_DIR}/v2ray`;
 const CLOUDFLARED_BIN = `${HOME}/cloudflared`;
 const WS_PATH = '/fengyue';
-const V2RAY_INTERNAL_PORT = 10000;
+const V2RAY_PORT = 10000;
+const ARGO_PORT = 8001;
 
 function httpGet(url, timeout = 5000) {
   return new Promise((resolve) => {
@@ -93,25 +94,16 @@ async function downloadCloudflared() {
   return CLOUDFLARED_BIN;
 }
 
-function startArgoTunnel(cfBin, inboundPort, argoDomain, argoAuth) {
+function startArgoTunnel(cfBin, argoDomain, argoAuth) {
   return new Promise((resolve) => {
-    let args;
     let argoHost = '';
+    let args;
 
     if (argoDomain && argoAuth) {
       // 固定隧道
       console.log('启动固定 Argo 隧道...');
-      if (argoAuth.includes('.json') || argoAuth.startsWith('{')) {
-        // json 凭证文件方式
-        fs.writeFileSync(`${HOME}/tunnel.json`, argoAuth);
-        args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
-                'run', '--token', argoAuth,
-                '--url', `http://127.0.0.1:${inboundPort}`];
-      } else {
-        // token 方式
-        args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
-                'run', '--token', argoAuth];
-      }
+      args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
+              'run', '--token', argoAuth];
       argoHost = argoDomain;
       const cf = spawn(cfBin, args, { stdio: 'pipe' });
       cf.on('error', (err) => console.error('cloudflared error:', err));
@@ -120,10 +112,9 @@ function startArgoTunnel(cfBin, inboundPort, argoDomain, argoAuth) {
       // 临时隧道
       console.log('启动临时 Argo 隧道...');
       args = ['tunnel', '--edge-ip-version', 'auto', '--no-autoupdate',
-              '--url', `http://127.0.0.1:${inboundPort}`];
+              '--url', `http://127.0.0.1:${ARGO_PORT}`];
       const cf = spawn(cfBin, args, { stdio: 'pipe' });
 
-      // 从日志里解析分配的域名
       cf.stderr.on('data', (data) => {
         const str = data.toString();
         const match = str.match(/https:\/\/([a-z0-9-]+\.trycloudflare\.com)/);
@@ -136,7 +127,6 @@ function startArgoTunnel(cfBin, inboundPort, argoDomain, argoAuth) {
 
       cf.on('error', (err) => console.error('cloudflared error:', err));
 
-      // 30秒超时还没获取到域名就继续
       setTimeout(() => {
         if (!argoHost) {
           console.log('临时隧道域名获取超时');
@@ -172,7 +162,7 @@ async function main() {
                   await httpGet('https://ifconfig.co/country-iso') ||
                   '';
 
-  let NAME = process.env.NAME || '';
+  let NAME = PRESET_NAME || process.env.NAME || '';
   if (!NAME) {
     let ASN_ORG = await httpGet('https://ipinfo.io/org') ||
                   await httpGet('https://ifconfig.co/org') ||
@@ -189,11 +179,11 @@ async function main() {
            COUNTRY ? `${COUNTRY}-argo` : 'argo';
   }
 
-  // 生成 v2ray 配置
+  // 生成 v2ray 配置，监听 ARGO_PORT 供 cloudflared 直连
   const config = {
     log: { loglevel: 'warning' },
     inbounds: [{
-      port: V2RAY_INTERNAL_PORT,
+      port: V2RAY_PORT,
       listen: '127.0.0.1',
       protocol: 'vmess',
       settings: {
@@ -226,28 +216,15 @@ async function main() {
   });
   v2ray.on('exit', (code) => process.exit(code));
 
-  // 启动 HTTP 服务（给 cloudflared 转发用）
-  const INDEX_HTML = fs.existsSync('./index.html')
-    ? fs.readFileSync('./index.html', 'utf8')
-    : '<html><body><h1>Hello World</h1></body></html>';
-
-  const server = http.createServer((req, res) => {
-    const url = req.url.split('?')[0];
-    if (url === SUB_PATH) {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(global.SUB_CONTENT || '');
-    } else if (url === WS_PATH) {
-      res.writeHead(400);
-      res.end('Bad Request');
-    } else {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(INDEX_HTML);
-    }
+  // 启动 ARGO_PORT 的 HTTP 服务供 cloudflared 转发 WebSocket 给 v2ray
+  const argoServer = http.createServer((req, res) => {
+    res.writeHead(400);
+    res.end('Bad Request');
   });
 
-  server.on('upgrade', (req, socket, head) => {
+  argoServer.on('upgrade', (req, socket, head) => {
     const net = require('net');
-    const proxy = net.connect(V2RAY_INTERNAL_PORT, '127.0.0.1', () => {
+    const proxy = net.connect(V2RAY_PORT, '127.0.0.1', () => {
       proxy.write(
         `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n` +
         Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') +
@@ -261,13 +238,33 @@ async function main() {
     socket.on('error', () => proxy.destroy());
   });
 
+  argoServer.listen(ARGO_PORT, '127.0.0.1', () => {
+    console.log(`Argo 转发服务启动，端口 ${ARGO_PORT}`);
+  });
+
+  // 启动对外 HTTP 服务（伪装页和订阅）
+  const INDEX_HTML = fs.existsSync('./index.html')
+    ? fs.readFileSync('./index.html', 'utf8')
+    : '<html><body><h1>Hello World</h1></body></html>';
+
+  const server = http.createServer((req, res) => {
+    const url = req.url.split('?')[0];
+    if (url === SUB_PATH) {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(global.SUB_CONTENT || '');
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(INDEX_HTML);
+    }
+  });
+
   server.listen(INBOUND_PORT, '0.0.0.0', () => {
     console.log(`HTTP 服务启动，端口 ${INBOUND_PORT}`);
   });
 
   // 下载并启动 cloudflared
   const cfBin = await downloadCloudflared();
-  const argoHost = await startArgoTunnel(cfBin, INBOUND_PORT, ARGO_DOMAIN, ARGO_AUTH);
+  const argoHost = await startArgoTunnel(cfBin, ARGO_DOMAIN, ARGO_AUTH);
 
   const HOST = argoHost || 'your-domain.com';
 
