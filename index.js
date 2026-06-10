@@ -1,11 +1,11 @@
 // ========== 预留配置，留空则自动识别 ==========
 const PRESET_UUID        = '';
 const PRESET_PORT        = '';
+const PRESET_ARGO_PORT   = '';
 const PRESET_NAME        = '';
 const PRESET_SUB         = '';
 const PRESET_ARGO_DOMAIN = '';
 const PRESET_ARGO_AUTH   = '';
-const PRESET_ARGO_PORT   = '';
 // =============================================
 
 const { execSync, spawn } = require('child_process');
@@ -23,6 +23,7 @@ const CLOUDFLARED_BIN = `${HOME}/cloudflared`;
 const WS_PATH = '/fengyue';
 const V2RAY_PORT = 10000;
 const ARGO_PORT = parseInt(PRESET_ARGO_PORT || process.env.ARGO_PORT || '8001');
+const CF_PREFER_HOST = 'cdns.doon.eu.org';
 
 function httpGet(url, timeout = 5000) {
   return new Promise((resolve) => {
@@ -263,7 +264,7 @@ async function main() {
   const vmessObj = {
     v: '2',
     ps: NAME,
-    add: HOST,
+    add: CF_PREFER_HOST,
     port: '443',
     id: UUID,
     aid: '0',
@@ -272,7 +273,8 @@ async function main() {
     type: 'none',
     host: HOST,
     path: WS_PATH,
-    tls: 'tls'
+    tls: 'tls',
+    sni: HOST
   };
 
   const VMESS_LINK = 'vmess://' + Buffer.from(JSON.stringify(vmessObj)).toString('base64');
