@@ -35,7 +35,6 @@ jobs:
             --string-array true \
             --string-array-encoding base64 \
             --string-array-threshold 0.75 \
-            --rotate-string-array true \
             --dead-code-injection false
 
       - name: Package release files
