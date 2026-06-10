@@ -81,7 +81,7 @@ UUID=xxx ARGO_DOMAIN=你的域名 ARGO_AUTH=你的Token bash <(curl -sL https://
 | `UUID` | 节点唯一ID | 自动生成 |
 | `PORT` | 对外监听端口 | `3000` |
 | `ARGO_PORT` | Argo 内部转发端口 | `8001` |
-| `NAME` | 节点名称 | 自动识别国家+ASN |
+| `NAME` | 节点名称 | 自动生成 |
 | `SUB` | 订阅路径 | `sub` |
 | `ARGO_DOMAIN` | 固定隧道域名 | 留空用临时隧道 |
 | `ARGO_AUTH` | 固定隧道 Token | 留空用临时隧道 |
@@ -91,11 +91,11 @@ UUID=xxx ARGO_DOMAIN=你的域名 ARGO_AUTH=你的Token bash <(curl -sL https://
 ```javascript
 const PRESET_UUID        = '';
 const PRESET_PORT        = '';
-const PRESET_ARGO_PORT   = '';
 const PRESET_NAME        = '';
 const PRESET_SUB         = '';
 const PRESET_ARGO_DOMAIN = '';
 const PRESET_ARGO_AUTH   = '';
+const PRESET_ARGO_PORT   = '';
 ```
 
 ## 访问地址
@@ -112,20 +112,6 @@ const PRESET_ARGO_AUTH   = '';
 3. 选择 **Cloudflared** → 填写隧道名称
 4. 复制 token（`ARGO_AUTH`）
 5. 在 Public Hostname 里添加你的域名指向 `http://127.0.0.1:3000`（`ARGO_DOMAIN`）
-
-## 节点名称自动识别规则
-
-```
-手动指定 NAME
-        ↓
-国家简称+ASN组织名（例如 US-Amazon.com）
-        ↓
-识别失败 → argo
-```
-
-## 内存需求
-
-最低 128MB，建议 256MB。
 
 ## 注意事项
 
