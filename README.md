@@ -111,7 +111,7 @@ const PRESET_ARGO_PORT   = '';
 2. 进入 **Networks → Tunnels → Create a tunnel**
 3. 选择 **Cloudflared** → 填写隧道名称
 4. 复制 token（`ARGO_AUTH`）
-5. 在 Public Hostname 里添加你的域名指向 `http://127.0.0.1:3000`（`ARGO_DOMAIN`）
+5. 在 Public Hostname 里添加你的域名指向 `http://127.0.0.1:8001`（`ARGO_DOMAIN`）
 
 ## 注意事项
 
